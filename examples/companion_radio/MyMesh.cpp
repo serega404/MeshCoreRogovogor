@@ -2956,6 +2956,11 @@ bool MyMesh::handleCliCmd(uint32_t sender_ts, const char* cmd, char* buf, bool i
     saveWifiPrefs();
     strcpy(buf, "wifi mode: fallback");
 
+  } else if (strcmp(cmd, "wifi mode retry") == 0) {
+    _wifi_prefs.connect_mode = WIFI_CONNECT_MODE_RETRY;
+    saveWifiPrefs();
+    strcpy(buf, "wifi mode: retry");
+
   } else if (strcmp(cmd, "wifi mode no-fallback") == 0) {
     _wifi_prefs.connect_mode = WIFI_CONNECT_MODE_NO_FALLBACK;
     saveWifiPrefs();
@@ -3077,6 +3082,7 @@ void MyMesh::setCyr2LatContactsEnabled(bool enabled) {
 
 static const char* wifiConnectModeLabel(uint8_t mode) {
   switch (mode) {
+    case WIFI_CONNECT_MODE_RETRY:       return "retry";
     case WIFI_CONNECT_MODE_NO_FALLBACK: return "no-fallback";
     case WIFI_CONNECT_MODE_FALLBACK:
     default:                            return "fallback";
@@ -3096,7 +3102,7 @@ void MyMesh::loadWifiPrefs() {
     file.close();
   }
   if (_wifi_prefs.tcp_port == 0) _wifi_prefs.tcp_port = WIFI_TCP_PORT_DEFAULT;
-  if (_wifi_prefs.connect_mode > WIFI_CONNECT_MODE_NO_FALLBACK) {
+  if (_wifi_prefs.connect_mode > WIFI_CONNECT_MODE_RETRY) {
     _wifi_prefs.connect_mode = WIFI_CONNECT_MODE_FALLBACK;
   }
 }
@@ -3192,16 +3198,27 @@ void MyMesh::checkWifiConnection() {
     _serial = &_wifi_iface;
     _serial->enable();
   } else if (millis() - _wifi_connect_start > 15000) {
-    _wifi_connecting = false;
-    if (wifiConnectUsesFallback(_wifi_prefs.connect_mode)) {
-      // Timeout — revert to BLE
-      _wifi_prefs.comms_mode = COMMS_MODE_BLE;
-      saveWifiPrefs();
-      WiFi.disconnect(true);
-      // _serial already points to _ble_iface (set in switchCommsMode)
+    if (_wifi_prefs.connect_mode == WIFI_CONNECT_MODE_RETRY) {
+      if (_wifi_net_idx >= 0 && _wifi_net_idx < _wifi_prefs.network_count) {
+        _wifi_connect_start = millis();
+        WiFi.disconnect(true);
+        WiFi.begin(_wifi_prefs.networks[_wifi_net_idx].ssid,
+                   _wifi_prefs.networks[_wifi_net_idx].password);
+      } else {
+        _wifi_connecting = false;
+      }
     } else {
-      // No fallback — stop the attempt, keep WiFi mode
-      WiFi.disconnect(true);
+      _wifi_connecting = false;
+      if (wifiConnectUsesFallback(_wifi_prefs.connect_mode)) {
+        // Timeout — revert to BLE
+        _wifi_prefs.comms_mode = COMMS_MODE_BLE;
+        saveWifiPrefs();
+        WiFi.disconnect(true);
+        // _serial already points to _ble_iface (set in switchCommsMode)
+      } else {
+        // No fallback — stop the attempt, keep WiFi mode
+        WiFi.disconnect(true);
+      }
     }
   }
 }

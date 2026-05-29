@@ -94,8 +94,9 @@
 | `wifi del <ssid>` | удалить сеть; кавычки поддерживаются: `wifi del "My Network"` |
 | `wifi connect <idx>` | подключиться к сети по индексу из `wifi list` |
 | `wifi status` | текущий режим, IP, порт |
-| `wifi mode` | режим подключения WiFi (fallback / no-fallback) |
+| `wifi mode` | режим подключения WiFi (fallback / no-fallback / retry) |
 | `wifi mode fallback` | включить fallback на BLE при подключении |
+| `wifi mode retry` | бесконечные попытки подключения к WiFi |
 | `wifi mode no-fallback` | отключить fallback на BLE при подключении |
 | `wifi ip dhcp` | режим DHCP |
 | `wifi ip static <ip> <gw> <mask>` | статический IP |
@@ -108,6 +109,8 @@
   Таймаут → откат в BLE, режим в prefs меняется на BLE.
 - **WiFi no-fallback** (`wifi mode no-fallback`): BLE не включается во время подключения;
   при таймауте устройство остаётся в режиме WiFi без автоматического возврата в BLE.
+- **WiFi retry** (`wifi mode retry`): попытки подключения повторяются бесконечно (каждые 15 с),
+  BLE остаётся активным как fallback на время попыток.
 - **→ BLE**: WiFi отключается, BLE-реклама стартует.
   PIN генерируется случайно при первом запуске (6 цифр), сохраняется в prefs.
 - **→ USB**: оба стека отключаются, интерфейс — `Serial` (CDC).
