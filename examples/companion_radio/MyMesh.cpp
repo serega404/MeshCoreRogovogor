@@ -2856,8 +2856,9 @@ bool MyMesh::handleCliCmd(uint32_t sender_ts, const char* cmd, char* buf, bool i
       int n = 0;
       for (int i = 0; i < _wifi_prefs.network_count; i++)
         n += snprintf(buf + n, 512 - n, "[%d] %s\n", i, _wifi_prefs.networks[i].ssid);
-      snprintf(buf + n, 512 - n, "mode: %s  port: %u",
+      snprintf(buf + n, 512 - n, "mode: %s  connect: %s  port: %u",
                _wifi_prefs.ip_mode == IP_MODE_STATIC ? "static" : "dhcp",
+               wifiConnectModeLabel(_wifi_prefs.connect_mode),
                (unsigned)(_wifi_prefs.tcp_port ? _wifi_prefs.tcp_port : WIFI_TCP_PORT_DEFAULT));
     }
 
@@ -2947,6 +2948,19 @@ bool MyMesh::handleCliCmd(uint32_t sender_ts, const char* cmd, char* buf, bool i
       strcpy(buf, "Usage: wifi port <1-65535>");
     }
 
+  } else if (strcmp(cmd, "wifi mode") == 0) {
+    snprintf(buf, 512, "wifi mode: %s", wifiConnectModeLabel(_wifi_prefs.connect_mode));
+
+  } else if (strcmp(cmd, "wifi mode fallback") == 0) {
+    _wifi_prefs.connect_mode = WIFI_CONNECT_MODE_FALLBACK;
+    saveWifiPrefs();
+    strcpy(buf, "wifi mode: fallback");
+
+  } else if (strcmp(cmd, "wifi mode no-fallback") == 0) {
+    _wifi_prefs.connect_mode = WIFI_CONNECT_MODE_NO_FALLBACK;
+    saveWifiPrefs();
+    strcpy(buf, "wifi mode: no-fallback");
+
   } else if (strncmp(cmd, "wifi connect ", 13) == 0) {
     int idx = atoi(cmd + 13);
     if (idx >= 0 && idx < _wifi_prefs.network_count) {
@@ -2959,12 +2973,18 @@ bool MyMesh::handleCliCmd(uint32_t sender_ts, const char* cmd, char* buf, bool i
   } else if (strcmp(cmd, "wifi status") == 0) {
     const char* mode_str = (_wifi_prefs.comms_mode == COMMS_MODE_WIFI) ? "WiFi"
                          : (_wifi_prefs.comms_mode == COMMS_MODE_USB)  ? "USB" : "BLE";
-    if (_wifi_connecting) {
-      snprintf(buf, 512, "comms: %s (connecting...)", mode_str);
-    } else if (_wifi_prefs.comms_mode == COMMS_MODE_WIFI && WiFi.status() == WL_CONNECTED) {
-      snprintf(buf, 512, "comms: WiFi  ip: %s  port: %u",
-               WiFi.localIP().toString().c_str(),
-               (unsigned)(_wifi_prefs.tcp_port ? _wifi_prefs.tcp_port : WIFI_TCP_PORT_DEFAULT));
+    if (_wifi_prefs.comms_mode == COMMS_MODE_WIFI) {
+      const char* connect_mode = wifiConnectModeLabel(_wifi_prefs.connect_mode);
+      if (_wifi_connecting) {
+        snprintf(buf, 512, "comms: WiFi (%s, connecting...)", connect_mode);
+      } else if (WiFi.status() == WL_CONNECTED) {
+        snprintf(buf, 512, "comms: WiFi (%s)  ip: %s  port: %u",
+                 connect_mode,
+                 WiFi.localIP().toString().c_str(),
+                 (unsigned)(_wifi_prefs.tcp_port ? _wifi_prefs.tcp_port : WIFI_TCP_PORT_DEFAULT));
+      } else {
+        snprintf(buf, 512, "comms: WiFi (%s)", connect_mode);
+      }
     } else {
       snprintf(buf, 512, "comms: %s", mode_str);
     }
@@ -3055,6 +3075,18 @@ void MyMesh::setCyr2LatContactsEnabled(bool enabled) {
 
 #ifdef WITH_WIFI_SWITCHING
 
+static const char* wifiConnectModeLabel(uint8_t mode) {
+  switch (mode) {
+    case WIFI_CONNECT_MODE_NO_FALLBACK: return "no-fallback";
+    case WIFI_CONNECT_MODE_FALLBACK:
+    default:                            return "fallback";
+  }
+}
+
+static bool wifiConnectUsesFallback(uint8_t mode) {
+  return mode != WIFI_CONNECT_MODE_NO_FALLBACK;
+}
+
 void MyMesh::loadWifiPrefs() {
   memset(&_wifi_prefs, 0, sizeof(_wifi_prefs));
   _wifi_prefs.tcp_port = WIFI_TCP_PORT_DEFAULT;
@@ -3064,6 +3096,9 @@ void MyMesh::loadWifiPrefs() {
     file.close();
   }
   if (_wifi_prefs.tcp_port == 0) _wifi_prefs.tcp_port = WIFI_TCP_PORT_DEFAULT;
+  if (_wifi_prefs.connect_mode > WIFI_CONNECT_MODE_NO_FALLBACK) {
+    _wifi_prefs.connect_mode = WIFI_CONNECT_MODE_FALLBACK;
+  }
 }
 
 void MyMesh::saveWifiPrefs() {
@@ -3111,14 +3146,20 @@ void MyMesh::switchCommsMode(uint8_t mode, int wifi_net_idx) {
 
   if (mode == COMMS_MODE_WIFI && wifi_net_idx >= 0
       && wifi_net_idx < _wifi_prefs.network_count) {
+    bool use_fallback = wifiConnectUsesFallback(_wifi_prefs.connect_mode);
     _wifi_net_idx = wifi_net_idx;
     _wifi_connecting = true;
     _wifi_connect_start = millis();
     WiFi.begin(_wifi_prefs.networks[wifi_net_idx].ssid,
                _wifi_prefs.networks[wifi_net_idx].password);
-    // Keep BLE active as fallback during connection attempt
-    _serial = &_ble_iface;
-    _serial->enable();
+    if (use_fallback) {
+      // Keep BLE active as fallback during connection attempt
+      _serial = &_ble_iface;
+      _serial->enable();
+    } else {
+      _ble_iface.disable();
+      _serial = nullptr;
+    }
   } else if (mode == COMMS_MODE_USB) {
     WiFi.disconnect(true);
     _serial = nullptr;  // USB is managed externally
@@ -3151,12 +3192,17 @@ void MyMesh::checkWifiConnection() {
     _serial = &_wifi_iface;
     _serial->enable();
   } else if (millis() - _wifi_connect_start > 15000) {
-    // Timeout — revert to BLE
     _wifi_connecting = false;
-    _wifi_prefs.comms_mode = COMMS_MODE_BLE;
-    saveWifiPrefs();
-    WiFi.disconnect(true);
-    // _serial already points to _ble_iface (set in switchCommsMode)
+    if (wifiConnectUsesFallback(_wifi_prefs.connect_mode)) {
+      // Timeout — revert to BLE
+      _wifi_prefs.comms_mode = COMMS_MODE_BLE;
+      saveWifiPrefs();
+      WiFi.disconnect(true);
+      // _serial already points to _ble_iface (set in switchCommsMode)
+    } else {
+      // No fallback — stop the attempt, keep WiFi mode
+      WiFi.disconnect(true);
+    }
   }
 }
 
@@ -3173,12 +3219,17 @@ void MyMesh::initCommsFromPrefs() {
   }
   _ble_iface.begin(BLE_NAME_PREFIX, _prefs.node_name, _active_ble_pin);
   if (_wifi_prefs.comms_mode == COMMS_MODE_WIFI && _wifi_prefs.network_count > 0) {
-    // Start async WiFi; use BLE as fallback during connection
+    // Start async WiFi; BLE fallback depends on connect mode
     _wifi_net_idx = 0;
     _wifi_connecting = true;
     _wifi_connect_start = millis();
     WiFi.begin(_wifi_prefs.networks[0].ssid, _wifi_prefs.networks[0].password);
-    startInterface(_ble_iface);
+    if (wifiConnectUsesFallback(_wifi_prefs.connect_mode)) {
+      startInterface(_ble_iface);
+    } else {
+      _ble_iface.disable();
+      _serial = nullptr;
+    }
   } else {
     // BLE or USB: start BLE as default
     startInterface(_ble_iface);

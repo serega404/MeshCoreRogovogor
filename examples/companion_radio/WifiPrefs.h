@@ -11,6 +11,9 @@
 #define IP_MODE_DHCP     0
 #define IP_MODE_STATIC   1
 
+#define WIFI_CONNECT_MODE_FALLBACK     0
+#define WIFI_CONNECT_MODE_NO_FALLBACK  1
+
 struct WifiNetwork {
   char ssid[33];
   char password[64];
@@ -25,4 +28,5 @@ struct WifiPrefs {
   char        static_gw[16];
   char        static_mask[16];
   uint16_t    tcp_port;                         // 0 = use WIFI_TCP_PORT_DEFAULT
+  uint8_t     connect_mode;                     // WIFI_CONNECT_MODE_* (fallback/no-fallback)
 };

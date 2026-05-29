@@ -214,6 +214,9 @@
 | `wifi del <ssid>` | Удалить сеть. Кавычки поддерживаются: `wifi del "My Network"` |
 | `wifi connect <idx>` | Подключиться к сети по индексу из `wifi list` |
 | `wifi status` | Текущий режим (BLE/WiFi/USB), IP, порт |
+| `wifi mode` | Режим подключения WiFi (fallback / no-fallback) |
+| `wifi mode fallback` | Включить fallback на BLE при подключении |
+| `wifi mode no-fallback` | Отключить fallback на BLE при подключении |
 | `wifi ip dhcp` | Режим DHCP |
 | `wifi ip static <ip> <gw> <mask>` | Статический IP. Пример: `wifi ip static 192.168.1.100 192.168.1.1 255.255.255.0` |
 | `wifi port <1-65535>` | TCP порт (по умолчанию 5000) |
